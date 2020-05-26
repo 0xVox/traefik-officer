@@ -21,12 +21,12 @@ import (
 
 var (
 	linesProcessed = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "traefik_light_lines_processed",
+		Name: "traefik_officer_lines_processed",
 		Help: "Number of access log lines processed",
 	})
 
 	latencyMetrics = promauto.NewSummaryVec(prometheus.SummaryOpts{
-		Name:       "traefik_light_latency_metrics",
+		Name:       "traefik_officer_latency_metrics",
 		Help:       "Latency metrics per service / endpoint",
 		Objectives: map[float64]float64{0.5: 0.05, 0.9: 0.01, 0.99: 0.001},
 	},
@@ -44,6 +44,7 @@ func main() {
 	requestArgsPtr := flag.Bool("include-query-args", false,
 		"Set this if you wish for the query arguments to be displayed in the 'RequestPath' in latency metrics. Default: false")
 	configLocationPtr := flag.String("config-file", "", "Path to the config file.")
+	servePortPtr := flag.String("listen-port", "8080", "Which port to expose metrics on")
 
 	flag.Parse()
 
@@ -51,7 +52,7 @@ func main() {
 	fmt.Println("Config File At:", *configLocationPtr)
 	fmt.Println("Display Query Args In Metrics: ", *requestArgsPtr)
 
-	go serveProm()
+	go serveProm(*servePortPtr)
 
 	config, err := loadConfig(*configLocationPtr)
 	fmt.Printf("Ignoring Namespaces: %s \nIgnoring Routers: %s\n", config.IgnoredNamespaces, config.IgnoredRouters)
@@ -190,7 +191,7 @@ func loadConfig(configLocation string) (traefikLightConfig, error) {
 	return config, nil
 }
 
-func serveProm() {
+func serveProm(port string) {
 	http.Handle("/metrics", promhttp.Handler())
-	http.ListenAndServe(":8080", nil)
+	http.ListenAndServe(":"+port, nil)
 }
