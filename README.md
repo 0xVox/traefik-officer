@@ -59,7 +59,9 @@ The matching code just runs a "Contains" check on these routers, so be specific 
 #### Ignored Path
 This is for more granular control over which endpoints in a service get reported on. In our example above we ignore any that match the regex pattern `/images/`. 
 
-### Example Kubernetes Install
+### Examples
 
-Check the example folder
+Check the example folder, there is:
+- An example kubernetes deployment YAML
+- An example Grafana dashboard
 
