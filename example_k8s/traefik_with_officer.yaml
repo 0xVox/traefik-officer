@@ -1,0 +1,176 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  labels:
+    app: traefik
+  name: traefik
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: traefik
+  template:
+    metadata:
+      labels:
+        app: traefik
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8085"
+    spec:
+      containers:
+      - args:
+        - --configFile=/config/traefik.toml
+        image: traefik:v2.2
+        imagePullPolicy: IfNotPresent
+        name: traefik
+        ports:
+        - containerPort: 8083
+          name: metrics
+          protocol: TCP
+        - containerPort: 8443
+          name: https
+          protocol: TCP
+        - containerPort: 8082
+          name: ping
+          protocol: TCP
+        - containerPort: 8080
+          name: http
+          protocol: TCP
+        resources:
+          limits:
+            memory: 128Mi
+          requests:
+            memory: 128Mi
+        volumeMounts:
+        - mountPath: /config
+          name: config-volume
+        - mountPath: /logs
+          name: access-logs
+      - name: traefik-officer
+        image: goyface/traefik-officer:v1
+        imagePullPolicy: Always
+        ports:
+        - containerPort: 8080
+          name: officer-metrics
+        args:
+        - --log-file=/logs/accessLog.txt
+        - --listen-port=8084
+        - --config-file=/config/traefik_officer.json
+        volumeMounts:
+          - mountPath: /logs
+            name: access-logs
+          - mountPath: /config
+            name: officer-config
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+          limits:
+            cpu: 100m
+            memory: 100Mi
+      - name: exporter-merger
+        image: quay.io/rebuy/exporter-merger:v0.2.0
+        ports:
+        - containerPort: 8084
+        env:
+        # space-separated list of URLs
+        - name: MERGER_URLS
+          value: http://localhost:8083/metrics http://localhost:8084/metrics
+        # default exposed port, change only if need other than default 8080
+        - name: MERGER_PORT
+          value: "8085"
+        resources:
+          requests:
+            cpu: 100m
+            memory: 100Mi
+          limits:
+            cpu: 100m
+            memory: 100Mi
+      terminationGracePeriodSeconds: 30
+      volumes:
+      - name: access-logs
+        emptyDir: {}
+      - name: officer-config
+        configMap:
+            defaultMode: 420
+            name: traefik-officer-config
+      - configMap:
+          defaultMode: 420
+          name: traefik-config
+        name: config-volume
+      - configMap:
+          defaultMode: 420
+          name: traefik-dyn
+        name: traefik-dyn
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: traefik-officer-config
+data:
+  traefik_officer.json: |
+    {
+        "IgnoredNamespaces": [
+            "/^-$/",
+            "test"
+        ],
+        "IgnoredRouters": [
+            "website",
+            "api@internal",
+            "prometheus@internal",
+            "http-to-443@internal"
+        ],
+        "IgnoredPathsRegex": [
+            "\/images\/"
+        ]
+    }
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  labels:
+    app: traefik
+  name: traefik-config
+  namespace: prod-traefik
+data:
+  traefik.toml: |
+    defaultEntryPoints = ["http", "https"]
+
+    [metrics]
+      [metrics.prometheus]
+        entryPoint = "metrics"
+        buckets = [0.1,0.3,1.2,5.0]
+        addEntryPointsLabels = true
+        addServicesLabels = true
+    
+
+    [entryPoints]
+      [entryPoints.metrics]
+        address = ":8083"
+
+      [entryPoints.ping]
+        address = ":8082"
+
+      [entryPoints.http]
+        address = ":8080"
+        [entryPoints.http.http.redirections]
+          [entryPoints.http.http.redirections.entryPoint]
+            to = ":443"
+            scheme = "https"
+      
+      [entryPoints.https]
+        address = ":8443"
+
+    [providers]
+      providersThrottleDuration = 42
+      [providers.kubernetesCRD]
+
+    [ping]
+      entryPoint = "ping"
+
+    [accessLog]
+      filePath = "/logs/accessLog.txt"
+      bufferingSize = 100
+
+    [log]
+      level = "ERROR"

@@ -25,6 +25,11 @@ var (
 		Help: "Number of access log lines processed",
 	})
 
+	linesIgnored = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "traefik_officer_lines_ignored",
+		Help: "Number of access log lines ignored from latency metrics",
+	})
+
 	latencyMetrics = promauto.NewSummaryVec(prometheus.SummaryOpts{
 		Name:       "traefik_officer_latency_metrics",
 		Help:       "Latency metrics per service / endpoint",
@@ -99,6 +104,7 @@ func main() {
 			checkMatches(routerName, config.IgnoredRouters) || checkMatches(requestPath, config.IgnoredPathsRegex))
 
 		if ignoreMatched {
+			linesIgnored.Inc()
 			continue
 		}
 

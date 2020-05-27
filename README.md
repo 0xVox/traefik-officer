@@ -1,12 +1,14 @@
 # Traefik Officer
-A small Go library designed to enable endpoint level metrics from requests logged in Traefik's access logs.
+A small Go library designed to enable endpoint level prometheus metrics from requests logged in Traefik's access logs.
 
 ## Config
 
 ### Command Line Arguments:
+
 - `--log-file` - Point at your traefik access log.
 - `--include-query-args` - Decide whether or not to split requests to a specific endpoint into separate metrics based on the arguments passed in the URL. Not reccomended.
 - `--config-file` - Point towards a json config file to configure ignored patterns. Read on for more info.
+- `--listen-port` - Which port to serve metrics on. Suggest combining with [this metrics merger](https://github.com/rebuy-de/exporter-merger) to enable receiving metrics from both Traefik and Traefik officer.
 
 ### Config File
 The config file is used to define things that should be ignored by the metrics publisher. An example of such a config file:
@@ -29,9 +31,9 @@ The config file is used to define things that should be ignored by the metrics p
 ```
 
 The ignore function will check in the order:
-    - Namespaces
-    - Routers
-    - Path Regex
+- Namespaces
+- Routers
+- Path Regex
 
 All matching options compile down to Golang Regex before being checked for a match. It's important that you escape any special characters. You can test regex for golang [here](https://regex101.com/) with flavor set to Golang.
 
@@ -57,6 +59,7 @@ The matching code just runs a "Contains" check on these routers, so be specific 
 #### Ignored Path
 This is for more granular control over which endpoints in a service get reported on. In our example above we ignore any that match the regex pattern `/images/`. 
 
+### Example Kubernetes Install
 
+Check the example folder
 
-## Installation
