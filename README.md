@@ -1,14 +1,18 @@
 # Traefik Officer
 A small Go library designed to enable endpoint level prometheus metrics from requests logged in Traefik's access logs.
+[Docker Hub](https://hub.docker.com/repository/registry-1.docker.io/goyface/traefik-officer/tags?page=1)
 
 ## Config
 
 ### Command Line Arguments:
 
 - `--log-file` - Point at your traefik access log.
-- `--include-query-args` - Decide whether or not to split requests to a specific endpoint into separate metrics based on the arguments passed in the URL. Not reccomended.
+- `--include-query-args` - Decide whether or not to split requests to a specific endpoint into separate metrics based on the arguments passed in the URL( `?arg=` and `&arg=` query strings). Not reccomended! Default false.
 - `--config-file` - Point towards a json config file to configure ignored patterns. Read on for more info.
 - `--listen-port` - Which port to serve metrics on. Suggest combining with [this metrics merger](https://github.com/rebuy-de/exporter-merger) to enable receiving metrics from both Traefik and Traefik officer.
+- `--max-accesslog-size` - Define the size, in megabytes, at which the traefik accessLog should be rotated. Default is 10, this is important to keep memory usage down.
+- `--strict-whitelist` - If this is enabled - ONLY request paths that match (a `string.Contains()`) the whitelist are enabled for metrics. If strict is false, the whitelist will be used to make exceptions for ignore rules. Default false.
+- `--pass-log-above-threshold` - Define the time, in ms, above which requests' traefik log lines will be passed through to stdout for further processing and investigation.
 
 ### Config File
 The config file is used to define things that should be ignored by the metrics publisher. An example of such a config file:
@@ -26,6 +30,13 @@ The config file is used to define things that should be ignored by the metrics p
     ],
     "IgnoredPathsRegex": [
         "\/images\/"
+    ],
+    "MergePathsWithExtensions": [
+        "/api",
+        "/test"
+    ],
+    "WhitelistPaths":[
+        "/api/v2/"
     ]
 }
 ```
@@ -58,6 +69,23 @@ The matching code just runs a "Contains" check on these routers, so be specific 
 
 #### Ignored Path
 This is for more granular control over which endpoints in a service get reported on. In our example above we ignore any that match the regex pattern `/images/`. 
+
+### MergePathsWithExtensions
+This can be used to remove query strings of the form:
+`www.example.com/api/endpoint/arg/arg/arg`
+By putting `/api/endpoint` in this list will stop getting metrics being collected for each combination of arguments in the URL, and instead simplify them down and add all counts to the `/api/endpoint` index.
+
+#### WhiteListPaths
+This list serves two purposes, depending on whether strict whitelisting is enabled or disabled.
+
+If `strict-whitelist` is `true`:
+- Only paths that match this whitelist (with a `.contains()`) will have metrics published.
+- All paths on the list, that have a duration greater that `pass-log-above-threshold` will have their accessLog printed to stdout of traefik-officer.
+
+If `strict-whitelist` is `false`:
+- Whitelist entries which also match an ignore rule will not be ignores.
+- All paths on the list, that have a duration greater that `pass-log-above-threshold` will have their accessLog printed to stdout of traefik-officer.
+
 
 ### Examples
 
