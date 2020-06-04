@@ -4,6 +4,7 @@ metadata:
   labels:
     app: traefik
   name: traefik
+  namespace: officer-test
 spec:
   replicas: 1
   selector:
@@ -20,7 +21,7 @@ spec:
       containers:
       - args:
         - --configFile=/config/traefik.toml
-        image: traefik:v2.2
+        image: traefik:v2.2.1
         imagePullPolicy: IfNotPresent
         name: traefik
         ports:
@@ -38,24 +39,36 @@ spec:
           protocol: TCP
         resources:
           limits:
-            memory: 128Mi
+            cpu: 200m
+            memory: 200Mi
           requests:
-            memory: 128Mi
+            cpu: 200m
+            memory: 200Mi
         volumeMounts:
         - mountPath: /config
           name: config-volume
         - mountPath: /logs
           name: access-logs
       - name: traefik-officer
-        image: goyface/traefik-officer:v1
+        image: goyface/traefik-officer:v1.1
         imagePullPolicy: Always
         ports:
         - containerPort: 8080
           name: officer-metrics
         args:
+        # Location of the accessLog in the container.
         - --log-file=/logs/accessLog.txt
+        # Metrics port
         - --listen-port=8084
+        # Config file, see configmap
         - --config-file=/config/traefik_officer.json
+        # Maximum size, in MB of the accessLog
+        - --max-accesslog-size=50
+        # The duration, in ms, above which a whitelisted request path will have its access log lines passed through to stdout
+        - --pass-log-above-threshold=1000
+        # Strict whitelist - ONLY paths matching the whitelist will have metrics taken on them.
+        # If false, used to bypass ignore rules and also a requirment to having high latency log lines passed through to stdout.
+        - --strict-whitelist=true
         volumeMounts:
           - mountPath: /logs
             name: access-logs
@@ -76,7 +89,6 @@ spec:
         # space-separated list of URLs
         - name: MERGER_URLS
           value: http://localhost:8083/metrics http://localhost:8084/metrics
-        # default exposed port, change only if need other than default 8080
         - name: MERGER_PORT
           value: "8085"
         resources:
@@ -108,6 +120,11 @@ kind: ConfigMap
 metadata:
   name: traefik-officer-config
 data:
+  # This example will merge all paths that hit /api into the same metric, and passthrough to stdout
+  # traefik's access logs on any calls with /api/v2 in them, that have a duration greater than is configured
+  # in the CLI argument `pass-log-above-threshold` for later inspection.
+  # Requests on routers in the test namespace will be ignored. Requests to three internal routers and website router
+  # will be ignored. Any path with `/images/` in will be ignored.
   traefik_officer.json: |
     {
         "IgnoredNamespaces": [
@@ -122,6 +139,13 @@ data:
         ],
         "IgnoredPathsRegex": [
             "\/images\/"
+        ],
+        "MergePathsWithExtensions": [
+          "/api",
+          "/test"
+        ],
+        "WhitelistPaths":[
+          "/api/v2/"
         ]
     }
 ---
@@ -131,7 +155,7 @@ metadata:
   labels:
     app: traefik
   name: traefik-config
-  namespace: prod-traefik
+  namespace: officer-test
 data:
   traefik.toml: |
     defaultEntryPoints = ["http", "https"]
@@ -174,3 +198,55 @@ data:
 
     [log]
       level = "ERROR"
+---
+kind: Deployment
+apiVersion: apps/v1
+metadata:
+  namespace: officer-test
+  name: whoami
+  labels:
+    app: whoami
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: whoami
+  template:
+    metadata:
+      labels:
+        app: whoami
+    spec:
+      containers:
+        - name: whoami
+          image: containous/whoami
+          ports:
+            - name: web
+              containerPort: 80
+---
+apiVersion: traefik.containo.us/v1alpha1
+kind: IngressRoute
+metadata:
+  name: simpleingressroute
+  namespace: officer-test
+spec:
+  entryPoints:
+    - http
+  routes:
+  - match: Host(`your.example.com`)
+    kind: Rule
+    services:
+    - name: whoami
+      port: 80
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: whoami
+  namespace: officer-test
+spec:
+  ports:
+    - protocol: TCP
+      name: web
+      port: 80
+  selector:
+    app: whoami
