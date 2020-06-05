@@ -41,7 +41,7 @@ var (
 		Help:    "Latency metrics per service / endpoint",
 		Buckets: []float64{0, 1, 5, 10, 25, 50, 100, 250, 500, 1000},
 	},
-		[]string{"RequestPath", "RequestMethod"})
+		[]string{"RequestPath", "RequestMethod", "ResponseCode"})
 )
 
 type traefikLightConfig struct {
@@ -152,7 +152,7 @@ func main() {
 			}
 
 			// Not ignored, publish metric
-			latencyMetrics.WithLabelValues(requestPath, d["RequestMethod"]).Observe(latency)
+			latencyMetrics.WithLabelValues(requestPath, d["RequestMethod"], d["OriginStatus"]).Observe(latency)
 		}
 	}
 }
