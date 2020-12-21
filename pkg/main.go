@@ -44,7 +44,7 @@ var (
 		[]string{"RequestPath", "RequestMethod"})
 )
 
-type traefikLightConfig struct {
+type traefikOfficerConfig struct {
 	IgnoredNamespaces        []string `json:"IgnoredNamespaces"`
 	IgnoredRouters           []string `json:"IgnoredRouters"`
 	IgnoredPathsRegex        []string `json:"IgnoredPathsRegex"`
@@ -193,6 +193,10 @@ func checkMatches(str string, matchExpressions []string) bool {
 	return false
 }
 
+func parseJSON(line string) (map[string]string, error) {
+
+}
+
 func parseLine(line string) (map[string]string, error) {
 	var buffer bytes.Buffer                      // Stolen from traefik repo pkg/middlewares/accesslog/parser.go
 	buffer.WriteString(`(\S+)`)                  // 1 - ClientHost
@@ -243,15 +247,15 @@ func parseLine(line string) (map[string]string, error) {
 	return nil, err
 }
 
-func loadConfig(configLocation string) (traefikLightConfig, error) {
+func loadConfig(configLocation string) (traefikOfficerConfig, error) {
 	cfgFile, err := os.Open(configLocation)
 	if err != nil {
 		fmt.Printf("Error opening config file: %s", configLocation)
-		var emptyConf traefikLightConfig
+		var emptyConf traefikOfficerConfig
 		return emptyConf, err
 	}
 	defer cfgFile.Close()
-	var config traefikLightConfig
+	var config traefikOfficerConfig
 
 	byteValue, err := ioutil.ReadAll(cfgFile)
 	if err != nil {
