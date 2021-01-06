@@ -20,6 +20,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+	logger "github.com/sirupsen/logrus"
 )
 
 // EstBytesPerLine Estimated number of bytes per line - for log rotation
@@ -36,6 +37,11 @@ var (
 		Help: "Number of access log lines ignored from latency metrics",
 	})
 
+	traefikOverhead = promauto.NewSummary(prometheus.SummaryOpts{
+		Name: "traefik_officer_overhead",
+		Help: "The overhead caused by traefik processing of requests",
+	})
+
 	latencyMetrics = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "traefik_officer_latency",
 		Help:    "Latency metrics per service / endpoint",
@@ -43,6 +49,8 @@ var (
 	},
 		[]string{"RequestPath", "RequestMethod"})
 )
+
+type parser func(line string) (traefikJSONLog, error)
 
 type traefikOfficerConfig struct {
 	IgnoredNamespaces        []string `json:"IgnoredNamespaces"`
@@ -52,7 +60,22 @@ type traefikOfficerConfig struct {
 	WhitelistPaths           []string `json:"WhitelistPaths"`
 }
 
+type traefikJSONLog struct {
+	ClientHost        string  `json:"ClientHost"`
+	StartUTC          string  `json:"StartUTC"`
+	RouterName        string  `json:"RouterName"`
+	RequestMethod     string  `json:"RequestMethod"`
+	RequestPath       string  `json:"RequestPath"`
+	RequestProtocol   string  `json:"RequestProtocol"`
+	OriginStatus      int     `json:"OriginStatus"`
+	OriginContentSize int     `json:"OriginContentSize"`
+	RequestCount      int     `json:"RequestCount"`
+	Duration          float64 `json:"Duration"`
+	Overhead          float64 `json:"Overhead"`
+}
+
 func main() {
+	debugLogPtr := flag.Bool("debug", false, "Enable debug logging. False by default.")
 	fileNamePtr := flag.String("log-file", "./accessLog.txt", "The traefik access log file. Default: ./accessLog.txt")
 	requestArgsPtr := flag.Bool("include-query-args", false,
 		"Set this if you wish for the query arguments to be displayed in the 'RequestPath' in latency metrics. Default: false")
@@ -62,13 +85,20 @@ func main() {
 		"How many megabytes should we allow the accesslog to grow to before rotating")
 	strictWhiteListPtr := flag.Bool("strict-whitelist", false,
 		"If true, ONLY patterns matching the whitelist will be counted. If false, patterns whitelisted just skip ignore rules")
+	jsonLogsPtr := flag.Bool("json-logs", false,
+		"If true, parse JSON logs instead of accessLog format")
 	passLogAboveThresholdPtr := flag.Float64("pass-log-above-threshold", 1,
 		"Passthrough traefik accessLog line to stdout if request takes longer that X seconds. Only whitelisted request paths.")
 	flag.Parse()
 
-	fmt.Println("Access Logs At:", *fileNamePtr)
-	fmt.Println("Config File At:", *configLocationPtr)
-	fmt.Println("Display Query Args In Metrics: ", *requestArgsPtr)
+	if *debugLogPtr {
+		logger.SetLevel(logger.DebugLevel)
+	}
+
+	logger.Info("Access Logs At:", *fileNamePtr)
+	logger.Info("Config File At:", *configLocationPtr)
+	logger.Info("Display Query Args In Metrics: ", *requestArgsPtr)
+	logger.Info("JSON Logs:", *jsonLogsPtr)
 	config, _ := loadConfig(*configLocationPtr)
 	go serveProm(*servePortPtr)
 
@@ -85,49 +115,55 @@ func main() {
 		MustExist: false,
 		Poll:      true,
 	}
+	var parse parser
+	if *jsonLogsPtr {
+		logger.Info("Setting parser to JSON")
+		parse = func(line string) (traefikJSONLog, error) {
+			result, err := parseJSON(line)
+			return result, err
+		}
+	} else {
+		parse = func(line string) (traefikJSONLog, error) {
+			result, err := parseLine(line)
+			return result, err
+		}
+	}
 
-	fmt.Printf("Opening file\n")
+	logger.Info("Opening file\n")
 	t, err := tail.TailFile(*fileNamePtr, tCfg)
 	for {
 		if err != nil {
-			fmt.Println(err)
+			logger.Error(err)
 			os.Exit(1)
 		}
 
-		fmt.Printf("Starting read\n")
+		logger.Info("Starting read\n")
 		i := 0
 		for line := range t.Lines {
 			i++
 			if i >= linesToRotate {
 				i = 0
 				logRotate(*fileNamePtr)
-				fmt.Println("Rotated Access Log")
 			}
-			d, err := parseLine(line.Text)
+			logger.Debugf("Read Line: %s", line.Text)
+			d, err := parse(line.Text)
 			if err != nil && err.Error() == "ParseError" {
-				fmt.Printf("Parse error for: \n  %s", line.Text)
+				logger.Error("Parse error for: \n  %s", line.Text)
 				continue
 			}
 
 			// Push metrics to prometheus exporter
 			linesProcessed.Inc()
-			latencyStr := strings.Trim(d["Duration"], "ms")
-			latency, err := strconv.ParseFloat(latencyStr, 64)
-			if err != nil {
-				// HTTP Errors turn up here for now
-				fmt.Printf("Error converting %s to float\n", latencyStr)
-				fmt.Printf("From Line: %s\n\n", line)
-			}
 
-			requestPath := d["RequestPath"]
+			requestPath := d.RequestPath
 			if *requestArgsPtr == false {
-				requestPath = strings.Split(d["RequestPath"], "?")[0]
+				logger.Debug("Trimming query arguments")
+				requestPath = strings.Split(d.RequestPath, "?")[0]
 				requestPath = strings.Split(requestPath, "&")[0]
 
 				// Merge paths where query args are embedded in url (/api/arg1/arg1)
 				requestPath = mergePaths(requestPath, config.MergePathsWithExtensions)
 			}
-			routerName := strings.Trim(d["RouterName"], "\\\"")
 
 			// Check whether path is in the whitelist:
 			isWhitelisted := checkWhiteList(requestPath, config.WhitelistPaths)
@@ -138,8 +174,8 @@ func main() {
 			}
 			if !isWhitelisted {
 				// Check whether routername matches ignored namespace, router or path regex.
-				ignoreMatched := (checkMatches(routerName, config.IgnoredNamespaces) ||
-					checkMatches(routerName, config.IgnoredRouters) || checkMatches(requestPath, config.IgnoredPathsRegex))
+				ignoreMatched := (checkMatches(d.RouterName, config.IgnoredNamespaces) ||
+					checkMatches(d.RouterName, config.IgnoredRouters) || checkMatches(requestPath, config.IgnoredPathsRegex))
 
 				if ignoreMatched {
 					linesIgnored.Inc()
@@ -147,12 +183,17 @@ func main() {
 				}
 			}
 
-			if latency > *passLogAboveThresholdPtr && isWhitelisted {
+			if d.Duration > *passLogAboveThresholdPtr && isWhitelisted {
 				fmt.Println(line.Text)
 			}
 
 			// Not ignored, publish metric
-			latencyMetrics.WithLabelValues(requestPath, d["RequestMethod"]).Observe(latency)
+			latencyMetrics.WithLabelValues(requestPath, d.RequestMethod).Observe(d.Duration)
+
+			// Only JSON logs have Overhead metrics
+			if *jsonLogsPtr {
+				traefikOverhead.Observe(d.Overhead)
+			}
 		}
 	}
 }
@@ -183,7 +224,7 @@ func checkMatches(str string, matchExpressions []string) bool {
 		reg, err := regexp.Compile(expr)
 
 		if err != nil {
-			fmt.Printf("Error compiling regex: %s \n", expr)
+			logger.Error("Error compiling regex: %s \n", expr)
 		}
 
 		if reg.MatchString(str) {
@@ -193,11 +234,41 @@ func checkMatches(str string, matchExpressions []string) bool {
 	return false
 }
 
-func parseJSON(line string) (map[string]string, error) {
+func parseJSON(line string) (traefikJSONLog, error) {
+	var log traefikJSONLog
+	var jsonValid bool
+	jsonValid = json.Valid([]byte(line))
 
+	if !jsonValid {
+		err := errors.New("JSON Log line invalid")
+		logger.Errorf("%s '%s'", err, line)
+	}
+
+	err := json.Unmarshal([]byte(line), &log)
+	if err != nil {
+		logger.Error(err)
+	}
+
+	log.Duration = log.Duration / 1000000 // JSON Logs format latency in nanoseconds, convert to ms
+	log.Overhead = log.Overhead / 1000000 // sane for overhead metrics
+
+	logger.Debugf("JSON Parsed: %s", log)
+	logger.Debugf("ClientHost: %s", log.ClientHost)
+	logger.Debugf("StartUTC: %s", log.StartUTC)
+	logger.Debugf("RouterName: %s", log.RouterName)
+	logger.Debugf("RequestMethod: %s", log.RequestMethod)
+	logger.Debugf("RequestPath: %s", log.RequestPath)
+	logger.Debugf("RequestProtocol: %s", log.RequestProtocol)
+	logger.Debugf("OriginStatus: %d", log.OriginStatus)
+	logger.Debugf("OriginContentSize: %dbytes", log.OriginContentSize)
+	logger.Debugf("RequestCount: %d", log.RequestCount)
+	logger.Debugf("Duration: %fms", log.Duration)
+	logger.Debugf("Overhead: %fms", log.Overhead)
+
+	return log, err
 }
 
-func parseLine(line string) (map[string]string, error) {
+func parseLine(line string) (traefikJSONLog, error) {
 	var buffer bytes.Buffer                      // Stolen from traefik repo pkg/middlewares/accesslog/parser.go
 	buffer.WriteString(`(\S+)`)                  // 1 - ClientHost
 	buffer.WriteString(`\s-\s`)                  // - - Spaces
@@ -217,40 +288,53 @@ func parseLine(line string) (map[string]string, error) {
 
 	regex, err := regexp.Compile(buffer.String())
 	if err != nil {
-		//fmt.Printf("Error parsing access log line: '%s'\n", line)
 		err = errors.New("ParseError")
 	}
 
 	submatch := regex.FindStringSubmatch(line)
-	result := make(map[string]string)
+	var log traefikJSONLog
 
 	if len(submatch) > 13 {
-		result["ClientHost"] = submatch[1]
-		result["ClientUsername"] = submatch[2]
-		result["StartUTC"] = submatch[3]
-		result["RequestMethod"] = submatch[4]
-		result["RequestPath"] = submatch[5]
-		result["RequestProtocol"] = submatch[6]
-		result["OriginStatus"] = submatch[7]
-		result["OriginContentSize"] = submatch[8]
-		result["RequestRefererHeader"] = submatch[9]
-		result["RequestUserAgentHeader"] = submatch[10]
-		result["RequestCount"] = submatch[11]
-		result["RouterName"] = submatch[12]
-		result["ServiceURL"] = submatch[13]
-		result["Duration"] = submatch[14]
-		return result, nil
+		log.ClientHost = submatch[1]
+		log.StartUTC = submatch[3]
+		log.RequestMethod = submatch[4]
+		log.RequestPath = submatch[5]
+		log.RequestProtocol = submatch[6]
+		log.OriginStatus, _ = strconv.Atoi(submatch[7])
+		log.OriginContentSize, _ = strconv.Atoi(submatch[8])
+		log.RequestCount, _ = strconv.Atoi(submatch[11])
+		log.RouterName = strings.Trim(submatch[12], "\\\"")
+
+		latencyStr := strings.Trim(submatch[14], "ms")
+		log.Duration, err = strconv.ParseFloat(latencyStr, 64)
+		if err != nil {
+			logger.Errorf("Error converting %s to int\n", latencyStr)
+			logger.Errorf("From Line: %s\n\n", line)
+		}
+
+		logger.Debugf("ClientHost: %s", log.ClientHost)
+		logger.Debugf("StartUTC: %s", log.StartUTC)
+		logger.Debugf("RouterName: %s", log.RouterName)
+		logger.Debugf("RequestMethod: %s", log.RequestMethod)
+		logger.Debugf("RequestPath: %s", log.RequestPath)
+		logger.Debugf("RequestProtocol: %s", log.RequestProtocol)
+		logger.Debugf("OriginStatus: %d", log.OriginStatus)
+		logger.Debugf("OriginContentSize: %d b", log.OriginContentSize)
+		logger.Debugf("RequestCount: %d", log.RequestCount)
+		logger.Debugf("Duration: %f ms", log.Duration)
+
+		return log, nil
 	}
 
-	//fmt.Printf("Line not in access log format: %s", line)
+	logger.Warn("Line not in access log format: %s", line)
 	err = errors.New("Access Log Line Invalid")
-	return nil, err
+	return log, err
 }
 
 func loadConfig(configLocation string) (traefikOfficerConfig, error) {
 	cfgFile, err := os.Open(configLocation)
 	if err != nil {
-		fmt.Printf("Error opening config file: %s", configLocation)
+		logger.Errorf("Error opening config file: %s", configLocation)
 		var emptyConf traefikOfficerConfig
 		return emptyConf, err
 	}
@@ -259,12 +343,12 @@ func loadConfig(configLocation string) (traefikOfficerConfig, error) {
 
 	byteValue, err := ioutil.ReadAll(cfgFile)
 	if err != nil {
-		fmt.Printf("Failed to read config file\n")
+		logger.Error("Failed to read config file\n")
 	}
 
 	err = json.Unmarshal(byteValue, &config)
 	if err != nil {
-		fmt.Println(err)
+		logger.Error(err)
 	}
 	return config, nil
 }
@@ -286,7 +370,7 @@ func logRotate(accessLogLocation string) {
 	}
 
 	if traefikPid == -1 {
-		fmt.Printf("Could not find traefik process - not rotating!\n")
+		logger.Warn("Could not find traefik process - not rotating!\n")
 		return
 	}
 
@@ -294,7 +378,7 @@ func logRotate(accessLogLocation string) {
 
 	traefikProcess, err := os.FindProcess(traefikPid)
 	if err != nil {
-		fmt.Printf("Could not find process with PID process - Not rotating!")
+		logger.Warn("Could not find process with PID process - Not rotating!")
 		return
 	}
 
@@ -324,7 +408,7 @@ func deleteFile(path string) {
 	// delete file
 	var err = os.Remove(path)
 	if err != nil {
-		fmt.Printf("Deleting accessLog failed.\n")
+		logger.Warn("Deleting accessLog failed.\n")
 		return
 	}
 }
