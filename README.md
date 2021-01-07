@@ -7,12 +7,14 @@ A small Go library designed to enable endpoint level prometheus metrics from req
 ### Command Line Arguments:
 
 - `--log-file` - Point at your traefik access log.
+- `--json-logs` - Parse Traefik json formatted logs. Only certain fields are supported at the moment.
 - `--include-query-args` - Decide whether or not to split requests to a specific endpoint into separate metrics based on the arguments passed in the URL( `?arg=` and `&arg=` query strings). Not reccomended! Default false.
 - `--config-file` - Point towards a json config file to configure ignored patterns. Read on for more info.
 - `--listen-port` - Which port to serve metrics on. Suggest combining with [this metrics merger](https://github.com/rebuy-de/exporter-merger) to enable receiving metrics from both Traefik and Traefik officer.
 - `--max-accesslog-size` - Define the size, in megabytes, at which the traefik accessLog should be rotated. Default is 10, this is important to keep memory usage down.
 - `--strict-whitelist` - If this is enabled - ONLY request paths that match (a `string.Contains()`) the whitelist are enabled for metrics. If strict is false, the whitelist will be used to make exceptions for ignore rules. Default false.
-- `--pass-log-above-threshold` - Define the time, in ms, above which requests' traefik log lines will be passed through to stdout for further processing and investigation.
+- `--pass-log-above-threshold` - Define the time, in ms, above which requests' traefik log lines will be passed through to stdout for further processing and investigation. Can be set to 0 to pass all access log lines.
+- `--debug` - Enables debug logging.
 
 ### Config File
 The config file is used to define things that should be ignored by the metrics publisher. An example of such a config file:
