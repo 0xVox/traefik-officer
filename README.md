@@ -1,6 +1,11 @@
 # Traefik Officer
 A small Go library designed to enable endpoint level prometheus metrics from requests logged in Traefik's access logs.
-[Docker Hub](https://hub.docker.com/repository/registry-1.docker.io/goyface/traefik-officer/tags?page=1)
+
+**Please note the docker hub account has changed**
+
+[Docker Hub](https://hub.docker.com/repository/registry-1.docker.io/0xvox/traefik-officer/tags?page=1)
+
+```docker pull 0xvox/traefik-officer```
 
 ## Config
 

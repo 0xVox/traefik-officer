@@ -1,0 +1,49 @@
+groups:
+- name: traefik_officer_recording
+  interval: 15s
+  rules:
+  - record: traefik_officer_average_latency
+    expr: sum(increase(traefik_officer_latency_sum[1m])) by (RequestPath, RequestMethod) / sum(increase(traefik_officer_latency_count[1m])) by (RequestPath, RequestMethod)
+
+  - record: traefik_officer_99th_pct
+    expr: histogram_quantile(0.99, sum by (le) (rate(traefik_officer_latency_bucket[10m])))
+  - record: traefik_officer_50th_pct
+    expr: histogram_quantile(0.5, sum by (le) (rate(traefik_officer_latency_bucket[10m])))
+
+  - record: traefik_officer_percent_requests_gt_10s
+    expr: (sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) - sum(rate(traefik_officer_latency_bucket{le="10000"}[5m])) by (RequestPath, RequestMethod)) / sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) * 100
+  - record: traefik_officer_percent_requests_gt_5s
+    expr: (sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) - sum(rate(traefik_officer_latency_bucket{le="5000"}[5m])) by (RequestPath, RequestMethod)) / sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) * 100
+  - record: traefik_officer_percent_requests_gt_2s
+    expr: (sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) - sum(rate(traefik_officer_latency_bucket{le="2000"}[5m])) by (RequestPath, RequestMethod)) / sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) * 100
+  - record: traefik_officer_percent_requests_gt_1s
+    expr: (sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) - sum(rate(traefik_officer_latency_bucket{le="1000"}[5m])) by (RequestPath, RequestMethod)) / sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) * 100
+  - record: traefik_officer_percent_requests_gt_500ms
+    expr: (sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) - sum(rate(traefik_officer_latency_bucket{le="500"}[5m])) by (RequestPath, RequestMethod)) / sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) * 100
+  - record: traefik_officer_percent_requests_gt_250ms
+    expr: (sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) - sum(rate(traefik_officer_latency_bucket{le="250"}[5m])) by (RequestPath, RequestMethod)) / sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) * 100
+  - record: traefik_officer_percent_requests_gt_100ms
+    expr: (sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) - sum(rate(traefik_officer_latency_bucket{le="100"}[5m])) by (RequestPath, RequestMethod)) / sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) * 100
+  - record: traefik_officer_percent_requests_gt_10ms
+    expr: (sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) - sum(rate(traefik_officer_latency_bucket{le="10"}[5m])) by (RequestPath, RequestMethod)) / sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) * 100
+
+  - record: traefik_officer_requests_processed_path_minute
+    expr: sum(rate(traefik_officer_latency_count[1m])) by (RequestPath, RequestMethod)
+
+  - record: traefik_officer_requests_processed_total_minute
+    expr: sum(rate(traefik_officer_latency_count[1m]))
+
+  - record: traefik_officer_load_by_pod_hourly
+    expr: sum by (pod) (rate(traefik_officer_latency_count[1h]))
+
+  - record: traefik_entrypoint_open_connections_sum
+    expr: sum(traefik_entrypoint_open_connections)
+
+  - record: traefik_entrypoint_get_requests_per_minute
+    expr: sum(rate(traefik_entrypoint_requests_total{method="GET", protocol="http"}[1m]))
+
+  - record: traefik_entrypoint_post_requests_per_minute
+    expr: sum(rate(traefik_entrypoint_requests_total{method="POST", protocol="http"}[1m]))
+
+  - record: traefik_entrypoint_get_ws_requests_per_minute
+    expr: sum(rate(traefik_entrypoint_requests_total{method="GET", protocol="websocket"}[1m]))
