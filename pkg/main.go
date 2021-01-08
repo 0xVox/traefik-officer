@@ -45,7 +45,7 @@ var (
 	latencyMetrics = promauto.NewHistogramVec(prometheus.HistogramOpts{
 		Name:    "traefik_officer_latency",
 		Help:    "Latency metrics per service / endpoint",
-		Buckets: []float64{0, 1, 5, 10, 25, 50, 100, 250, 500, 1000},
+		Buckets: []float64{0, 1, 5, 10, 25, 50, 100, 250, 500, 1000, 2000, 5000, 10000},
 	},
 		[]string{"RequestPath", "RequestMethod"})
 )
