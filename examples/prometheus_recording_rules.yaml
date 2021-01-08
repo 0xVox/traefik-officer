@@ -10,6 +10,11 @@ groups:
   - record: traefik_officer_50th_pct
     expr: histogram_quantile(0.5, sum by (le) (rate(traefik_officer_latency_bucket[10m])))
 
+
+  - record: traefik_officer_percent_requests_gt_60s
+    expr: (sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) - sum(rate(traefik_officer_latency_bucket{le="60000"}[5m])) by (RequestPath, RequestMethod)) / sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) * 100
+  - record: traefik_officer_percent_requests_gt_20s
+    expr: (sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) - sum(rate(traefik_officer_latency_bucket{le="20000"}[5m])) by (RequestPath, RequestMethod)) / sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) * 100
   - record: traefik_officer_percent_requests_gt_10s
     expr: (sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) - sum(rate(traefik_officer_latency_bucket{le="10000"}[5m])) by (RequestPath, RequestMethod)) / sum(rate(traefik_officer_latency_bucket{le="+Inf"}[5m])) by (RequestPath, RequestMethod) * 100
   - record: traefik_officer_percent_requests_gt_5s
