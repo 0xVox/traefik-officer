@@ -129,6 +129,11 @@ func main() {
 		}
 	}
 
+	whiteListChecker := checkWhiteList
+	if *strictWhiteListPtr {
+		whiteListChecker = checkWhiteListStrict
+	}
+
 	logger.Info("Opening file\n")
 	t, err := tail.TailFile(*fileNamePtr, tCfg)
 	for {
@@ -166,7 +171,7 @@ func main() {
 			}
 
 			// Check whether path is in the whitelist:
-			isWhitelisted := checkWhiteList(requestPath, config.WhitelistPaths)
+			isWhitelisted := whiteListChecker(requestPath, config.WhitelistPaths)
 
 			if !isWhitelisted && *strictWhiteListPtr {
 				linesIgnored.Inc()
@@ -196,6 +201,17 @@ func main() {
 			}
 		}
 	}
+}
+
+func checkWhiteListStrict(str string, matchStrings []string) bool {
+	for i := 0; i < len(matchStrings); i++ {
+		matchStr := matchStrings[i]
+		//if strings.Contains(str, matchStr) {
+		if matchStr == str {
+			return true
+		}
+	}
+	return false
 }
 
 func checkWhiteList(str string, matchStrings []string) bool {
